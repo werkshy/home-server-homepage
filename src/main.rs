@@ -47,7 +47,7 @@ fn main() {
         }
 
         // Render the page
-        let hostname_header = request.headers().iter().find(|h| h.field.equiv(&"Host"));
+        let hostname_header = request.headers().iter().find(|h| h.field.equiv("Host"));
         if hostname_header.is_none() {
             let response = Response::from_string("No Host header").with_status_code(400);
             let _ = request.respond(response);
@@ -71,7 +71,7 @@ fn main() {
 fn get_config(config_file: &str) -> Result<Config, String> {
     let toml_data = fs::read_to_string(config_file).map_err(|err| err.to_string())?;
     let config: Config = toml::from_str(toml_data.as_str()).map_err(|err| err.to_string())?;
-    return Ok(config);
+    Ok(config)
 }
 
 fn render_section(template: &str, host: &str, link: &Link) -> Result<String, String> {
@@ -85,10 +85,10 @@ fn render_section(template: &str, host: &str, link: &Link) -> Result<String, Str
     }
     let sub_heading = link.sub_heading.clone().unwrap_or(String::from("/"));
 
-    return Ok(template
+    Ok(template
         .replace("__URL__", url.as_str())
         .replace("__TITLE__", link.title.as_str())
-        .replace("__SUB_HEADING__", sub_heading.as_str()));
+        .replace("__SUB_HEADING__", sub_heading.as_str()))
 }
 
 fn set_port(host: &str, port: u32) -> String {
@@ -96,5 +96,5 @@ fn set_port(host: &str, port: u32) -> String {
         let hostname = host.split_once(":").unwrap().0;
         return format!("//{}:{}", hostname, port);
     }
-    return format!("//{}:{}", host, port);
+    format!("//{}:{}", host, port)
 }
