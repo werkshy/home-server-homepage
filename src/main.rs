@@ -1,7 +1,13 @@
-use std::fs::{self};
+use std::{
+    error::Error,
+    fs::{self},
+};
 
 use serde::Deserialize;
 use tiny_http::{Response, Server};
+
+const DEFAULT_PORT: u32 = 8000;
+const CONFIG_FILE: &str = "config.toml";
 
 #[derive(Deserialize, PartialEq, Debug)]
 struct Link {
@@ -22,39 +28,47 @@ struct Config {
     link: Vec<Link>,
 }
 
-fn main() {
-    let config = get_config("config.toml").unwrap();
-    let port = config.server.unwrap_or_default().port.unwrap_or(8000);
-    println!("Starting server on port {port}");
-    let server = Server::http(format!("0.0.0.0:{port}")).unwrap();
-    let content_type_header =
-        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap();
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let config = get_config(CONFIG_FILE)?;
+    let port = config
+        .server
+        .unwrap_or_default()
+        .port
+        .unwrap_or(DEFAULT_PORT);
+    println!("Starting server on port {port} - http://localhost:{port}");
+    let server = Server::http(format!("0.0.0.0:{port}"))?;
 
     let template = include_str!("templates/index.html");
     let section_html = include_str!("templates/section.html");
     let favicon = include_bytes!("templates/favicon.png");
 
+    let content_type_html =
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap();
+    let content_type_png =
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"image/png"[..]).unwrap();
+
     for request in server.incoming_requests() {
+        // We reload the config in each request because it's fast enough and it makes editing
+        // and testing config easier.
+        let config = get_config(CONFIG_FILE)?;
         println!("{:?} {:?}", request.method(), request.url());
 
         // Handle favicon requests
         if request.url() == "/favicon.png" {
-            let response = Response::from_data(favicon).with_header(
-                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"image/png"[..]).unwrap(),
-            );
+            let response = Response::from_data(favicon).with_header(content_type_png.clone());
             let _ = request.respond(response);
             continue;
         }
 
         // Render the page
-        let hostname_header = request.headers().iter().find(|h| h.field.equiv("Host"));
-        if hostname_header.is_none() {
-            let response = Response::from_string("No Host header").with_status_code(400);
-            let _ = request.respond(response);
-            continue;
-        }
-        let hostname = hostname_header.unwrap().value.clone();
-        println!("Header: {:?}", hostname);
+        let hostname = match request.headers().iter().find(|h| h.field.equiv("Host")) {
+            Some(header) => &header.value,
+            None => {
+                let response = Response::from_string("No Host header").with_status_code(400);
+                let _ = request.respond(response);
+                continue;
+            }
+        };
 
         let sections = config
             .link
@@ -63,9 +77,10 @@ fn main() {
             .collect::<Vec<String>>();
         let body = template.replace("__SECTIONS__", &sections.join("\n"));
 
-        let response = Response::from_string(body).with_header(content_type_header.clone());
-        request.respond(response).unwrap();
+        let response = Response::from_string(body).with_header(content_type_html.clone());
+        request.respond(response)?;
     }
+    Ok(())
 }
 
 fn get_config(config_file: &str) -> Result<Config, String> {
@@ -75,26 +90,22 @@ fn get_config(config_file: &str) -> Result<Config, String> {
 }
 
 fn render_section(template: &str, host: &str, link: &Link) -> Result<String, String> {
-    // TODO handle port vs url
-    let mut url = String::from("/");
-    if link.port.is_some() {
-        url = set_port(host, link.port.unwrap());
-    }
-    if link.url.is_some() {
-        url = link.url.clone().unwrap();
-    }
-    let sub_heading = link.sub_heading.clone().unwrap_or(String::from("/"));
+    let url = match (link.port, &link.url) {
+        (_, Some(url)) => url.clone(),
+        (Some(port), None) => set_port(host, port),
+        (None, None) => String::from("/"),
+    };
+
+    let sub_heading = link.sub_heading.as_deref().unwrap_or("/");
 
     Ok(template
-        .replace("__URL__", url.as_str())
-        .replace("__TITLE__", link.title.as_str())
-        .replace("__SUB_HEADING__", sub_heading.as_str()))
+        .replace("__URL__", &url)
+        .replace("__TITLE__", &link.title)
+        .replace("__SUB_HEADING__", sub_heading))
 }
 
 fn set_port(host: &str, port: u32) -> String {
-    if host.contains(":") {
-        let hostname = host.split_once(":").unwrap().0;
-        return format!("//{}:{}", hostname, port);
-    }
-    format!("//{}:{}", host, port)
+    let mut parts = host.splitn(2, ':');
+    let hostname = parts.next().unwrap_or(host);
+    format!("//{hostname}:{port}")
 }
