@@ -1,0 +1,17 @@
+[server]
+port = 8000
+
+[[link]]
+title = "Home Assistant"
+port = 8123
+sub_heading = "HVAC Controls and home automation."
+
+[[link]]
+title = "Jellyfin"
+port = 8096
+sub_heading = "Media Library."
+
+[[link]]
+title = "Edge Router"
+url = "https://192.168.1.1/"
+sub_heading = "Ubiquiti Edge Router."
